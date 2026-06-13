@@ -545,7 +545,6 @@ class TokenEmitter:
         return None
     
 # Cli - Portal cautivo 
-
 class CaptivePortal:
 
     def __init__(self):
@@ -643,7 +642,6 @@ class CaptivePortal:
                 return
 
     # El Flujo de login 
-
     def login(self):
         """
         Orquesta el flujo completo de autenticación.
@@ -668,7 +666,25 @@ class CaptivePortal:
 
             try:
                 codigo   = input("  Código PUCP : ").strip()
-                password = getpass.getpass("  Contraseña  : ")
+                import termios, tty
+                sys.stdout.write("  Contraseña  : ")
+                sys.stdout.flush()
+                fd = sys.stdin.fileno()
+                old = termios.tcgetattr(fd)
+                try:
+                    tty.setraw(fd)
+                    password = ""
+                    while True:
+                        ch = sys.stdin.read(1)
+                        if ch in ('\r', '\n'):
+                            break
+                        elif ch == '\x7f':
+                            password = password[:-1]
+                        else:
+                            password += ch
+                finally:
+                    termios.tcsetattr(fd, termios.TCSADRAIN, old)
+                sys.stdout.write('\n')
             except KeyboardInterrupt:
                 print("\n\n  Sesión cancelada.")
                 return
