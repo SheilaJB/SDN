@@ -63,11 +63,13 @@ class DatabaseManager:
             return None
         try:
             conexion = mysql.connector.connect(
-                host     = Config.MYSQL_HOST,
-                user     = Config.MYSQL_USER,
-                password = Config.MYSQL_PASS,
-                database = Config.MYSQL_DB,
-                autocommit = False
+            host         = Config.MYSQL_HOST,
+            user         = Config.MYSQL_USER,
+            password     = Config.MYSQL_PASS,
+            database     = Config.MYSQL_DB,
+            autocommit   = False,
+            use_pure     = True,
+            ssl_disabled = True
             )
             return conexion
         except mysql.connector.Error as e:
