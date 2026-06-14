@@ -6,7 +6,6 @@ Módulo M1 | Grupo 2 - TEL354
 import sys
 import os
 import json
-import getpass
 import time
 import datetime
 import tempfile
@@ -664,9 +663,27 @@ class CaptivePortal:
         intentos = 0
         while intentos < Config.MAX_INTENTOS:
 
+            # DESPUÉS:
             try:
-                codigo   = input("  Código PUCP : ").strip()
-                password = getpass.getpass("  Contraseña  : ")
+                codigo = input("  Código PUCP : ").strip()
+                # getpass crashea en terminales sin TTY real (VMs/VirtualBox)
+                import sys, termios, tty
+                print("  Contraseña  : ", end="", flush=True)
+                fd  = sys.stdin.fileno()
+                old = termios.tcgetattr(fd)
+                tty.setraw(fd)
+                chars = []
+                while True:
+                    ch = sys.stdin.read(1)
+                    if ch in ('\n', '\r'):
+                        break
+                    elif ch in ('\x7f', '\x08'):
+                        if chars: chars.pop()
+                    else:
+                        chars.append(ch)
+                termios.tcsetattr(fd, termios.TCSADRAIN, old)
+                print()
+                password = ''.join(chars)
             except KeyboardInterrupt:
                 print("\n\n  Sesión cancelada.")
                 return
