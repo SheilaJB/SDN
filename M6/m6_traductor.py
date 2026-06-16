@@ -88,21 +88,6 @@ class Config:
         "of:0000f220f9454c4e": "SW3",
     }
 
-    # Fallback hosts: cuando ONOS no tiene el host (IP asignada manualmente)
-    HOSTS_VNRT = {
-        "192.168.100.23": {
-            "mac":         "FA:16:3E:14:78:63",
-            "switch_dpid": "of:000072e0807e854c",
-            "in_port":     2
-        },
-        "192.168.100.100": {
-            "mac":         "FA:16:3E:E9:BF:92",
-            "switch_dpid": "of:000072e0807e854c",
-            "in_port":     3
-        }
-    }
-
-
     # Prioridades OpenFlow (acordadas en diseño de arquitectura)
     PRIO_VLAN_PUSH  = 10      # T1: sin tag → PUSH VLAN 90
     PRIO_DHCP       = 500     # T1: DHCP → CONTROLLER
@@ -668,7 +653,7 @@ class ONOSClient:
     def get_host_by_ip(self, ip_asignada):
         """
         Busca host en ONOS por IP → {mac, switch_dpid, in_port}.
-        Si ONOS no lo tiene (IP asignada fuera de ONOS DHCP), usa HOSTS_VNRT.
+        ONOS aprende los hosts dinámicamente vía DHCP.
         """
         try:
             resp = requests.get(
@@ -687,15 +672,9 @@ class ONOSClient:
         except Exception as e:
             print(f"  [ONOS] Error GET /hosts: {e}")
 
-        # Fallback a hosts conocidos del slice
-        if ip_asignada in Config.HOSTS_VNRT:
-            h = Config.HOSTS_VNRT[ip_asignada]
-            print(f"  [ONOS] Fallback VNRT para {ip_asignada}: mac={h['mac']}")
-            return dict(h)
-
-        print(f"  [ONOS] Host {ip_asignada} no encontrado")
+        print(f"  [ONOS] Host {ip_asignada} no encontrado en ONOS")
         return None
-
+       
     def get_devices(self):
         """Lista de deviceIds disponibles en ONOS."""
         try:

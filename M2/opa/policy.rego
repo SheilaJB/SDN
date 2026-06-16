@@ -100,20 +100,19 @@ construir_permiso(rid, r) := permiso if {
     permisivos[rid]
     ex := permisivos[rid]
     permiso := {
-        "recurso":     recurso_base(r),
-        "tabla":       "T3",
-        "ancho_banda": object.get(ex, "ancho_banda", r.ancho_banda_default),
-        "expires_at":  object.get(ex, "expires_at", null),
+        # se quito el parametro ancho de banda porque solo es metada
+        "recurso":    recurso_base(r),
+        "tabla":      "T3",
+        "expires_at": object.get(ex, "expires_at", null),
     }
 } else := permiso if {
     not denegados[rid]
     not permisivos[rid]
     cumple_condiciones(r.condiciones, r.combinacion)
     permiso := {
-        "recurso":     recurso_base(r),
-        "tabla":       "T2",
-        "ancho_banda": r.ancho_banda_default,
-        "expires_at":  null,
+        "recurso":    recurso_base(r),
+        "tabla":      "T2",
+        "expires_at": null,
     }
 }
 
@@ -134,10 +133,9 @@ allow_resource := decision if {
     r   := recursos[rid]
     ex  := user_exceptions_map[rid]
     decision := {
-        "allow":       ex.allow,
-        "ancho_banda": object.get(ex, "ancho_banda", r.ancho_banda_default),
-        "expires_at":  object.get(ex, "expires_at", null),
-        "razon":       "excepcion",
+        "allow":      ex.allow,
+        "expires_at": object.get(ex, "expires_at", null),
+        "razon":      "excepcion",
     }
 } else := decision if {
     rid := resolve_rid
@@ -145,10 +143,9 @@ allow_resource := decision if {
     not user_exceptions_map[rid]
     cumple_condiciones(r.condiciones, r.combinacion)
     decision := {
-        "allow":       true,
-        "ancho_banda": r.ancho_banda_default,
-        "expires_at":  null,
-        "razon":       "condiciones_generales",
+        "allow":      true,
+        "expires_at": null,
+        "razon":      "condiciones_generales",
     }
 } else := decision if {
     rid := resolve_rid
