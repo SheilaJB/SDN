@@ -90,7 +90,7 @@ class Config:
 
     # Prioridades OpenFlow (acordadas en diseño de arquitectura)
     PRIO_VLAN_PUSH  = 10      # T1: sin tag → PUSH VLAN 90
-    PRIO_DHCP       = 500     # T1: DHCP → CONTROLLER
+    PRIO_DHCP       = 500     # T0: DHCP → CONTROLLER (sin tag) 
     PRIO_PORTAL_T1  = 100     # T1: portal en cuarentena (tabla 1)
     PRIO_DROP_T1    = 5       # T1: DROP default cuarentena
     PRIO_SESION_T1  = 40000   # T1: SET_FIELD post-auth
@@ -138,12 +138,12 @@ class FlowBuilder:
         }
 
     def dhcp_al_controller(self, device_id):
-        """T1 prio500 — VLAN 90 + UDP dst=67 → CONTROLLER."""
+        """T0 prio500 — VLAN 90 + UDP dst=67 → CONTROLLER."""
         return {
             "priority":    Config.PRIO_DHCP,
             "isPermanent": True,
             "deviceId":    device_id,
-            "tableId":     1,
+            "tableId":     0,
             "selector": {"criteria": [
                 {"type": "VLAN_VID", "vlanId": Config.VLAN_CUARENTENA},
                 {"type": "ETH_TYPE", "ethType": "0x0800"},
