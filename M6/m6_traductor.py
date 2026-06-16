@@ -90,17 +90,18 @@ class Config:
 
     # Fallback hosts: cuando ONOS no tiene el host (IP asignada manualmente)
     HOSTS_VNRT = {
-    "192.168.100.23": {
-        "mac":         "FA:16:3E:14:78:63",
-        "switch_dpid": "of:000072e0807e854c",
-        "in_port":     2
-    },
-    "192.168.100.100": {
-        "mac":         "FA:16:3E:E9:BF:92",
-        "switch_dpid": "of:000072e0807e854c",
-        "in_port":     3
+        "192.168.100.23": {
+            "mac":         "FA:16:3E:14:78:63",
+            "switch_dpid": "of:000072e0807e854c",
+            "in_port":     2
+        },
+        "192.168.100.100": {
+            "mac":         "FA:16:3E:E9:BF:92",
+            "switch_dpid": "of:000072e0807e854c",
+            "in_port":     3
+        }
     }
-}
+
 
     # Prioridades OpenFlow (acordadas en diseño de arquitectura)
     PRIO_VLAN_PUSH  = 10      # T1: sin tag → PUSH VLAN 90
