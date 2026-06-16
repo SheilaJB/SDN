@@ -580,10 +580,16 @@ class PolicyEngine:
                 ],
                 "denegaciones": []
             }
-        else:                              # Visitante
+        else:   # Visitante
+            # TODO: Visitante debería tener acceso a internet externo (VLAN 100 → gateway)
+            # Requiere configurar NAT en el controller (192.168.201.210 vía ens3)
+            # que está fuera del plano SDN. Por ahora se permite acceso al portal únicamente.
             return {
-                "permisos":    [{"ip_dst": cursos, "puertos": [80]}],
-                "denegaciones":[]
+                "permisos":    [],
+                "denegaciones": [
+                    {"ip_dst": Config.SERVER_CURSOS, "puertos": [80, 443]},
+                    {"ip_dst": Config.SERVER_NOTAS,  "puertos": [80, 443]}
+                ]
             }
 
 
