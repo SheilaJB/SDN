@@ -90,6 +90,8 @@ ATTRIBUTE Calling-Station-Id 31  string
 ATTRIBUTE Called-Station-Id  30  string
 ATTRIBUTE Framed-IP-Address   8  ipaddr
 ATTRIBUTE Session-Timeout    27  integer
+ATTRIBUTE Acct-Status-Type   40  integer
+ATTRIBUTE Acct-Session-Id    44  string
 """
 class RadiusClient:
 
@@ -174,6 +176,77 @@ class RadiusClient:
         except Exception as e:
             print(f"  [RADIUS] Error: {e}")
             return None, None
+        
+    def accounting_start(self, codigo_pucp, ip_asignada, mac, session_id=None):
+        """
+        Envía Accounting-Start a FreeRADIUS para registrar inicio de sesión.
+        """
+        if not PYRAD_OK:
+            return
+        try:
+            import pyrad.packet as _pkt
+            cliente = pyrad.client.Client(
+                server   = Config.RADIUS_HOST,
+                acctport = 1813,
+                secret   = Config.RADIUS_SECRET,
+                dict     = self._build_dict()
+            )
+            cliente.timeout = 5
+            cliente.retries = 1
+
+            sid = session_id or f"{codigo_pucp}-{int(time.time())}"
+
+            paquete = cliente.CreateAcctPacket(
+                code      = _pkt.AccountingRequest,
+                User_Name = codigo_pucp
+            )
+            paquete["Acct-Status-Type"] = 1          # 1 = Start
+            paquete["Acct-Session-Id"]  = sid
+            paquete["NAS-IP-Address"]   = Config.NAS_IP
+            paquete["Framed-IP-Address"]= ip_asignada
+            paquete["Calling-Station-Id"] = mac
+
+            cliente.SendPacket(paquete)
+            print(f"  [RADIUS] ✓ Accounting-Start enviado (sid={sid})")
+
+        except Exception as e:
+            print(f"  [RADIUS] Accounting-Start error: {e}")
+            
+    def accounting_stop(self, codigo_pucp, ip_asignada, mac, session_id=None):
+        """
+        Envía Accounting-Stop a FreeRADIUS para registrar cierre de sesión.
+        """
+        if not PYRAD_OK:
+            return
+        try:
+            import pyrad.packet as _pkt
+            cliente = pyrad.client.Client(
+                server   = Config.RADIUS_HOST,
+                acctport = 1813,
+                secret   = Config.RADIUS_SECRET,
+                dict     = self._build_dict()
+            )
+            cliente.timeout = 5
+            cliente.retries = 1
+
+            sid = session_id or f"{codigo_pucp}-{int(time.time())}"
+
+            paquete = cliente.CreateAcctPacket(
+                code      = _pkt.AccountingRequest,
+                User_Name = codigo_pucp
+            )
+            paquete["Acct-Status-Type"] = 2          # 2 = Stop
+            paquete["Acct-Session-Id"]  = sid
+            paquete["NAS-IP-Address"]   = Config.NAS_IP
+            paquete["Framed-IP-Address"]= ip_asignada
+            paquete["Calling-Station-Id"] = mac
+
+            cliente.SendPacket(paquete)
+            print(f"  [RADIUS] ✓ Accounting-Stop enviado (sid={sid})")
+
+        except Exception as e:
+            print(f"  [RADIUS] Accounting-Stop error: {e}")
+    
         
         
 # Mapeo de Rol por filter id
@@ -685,6 +758,7 @@ class CaptivePortal:
                 print("  Cerrando sesión...")
                 sesion = self.sessions.close_session(mac, id_usuario)
                 if sesion:
+                    self.radius.accounting_stop(codigo_pucp, ip_asignada, mac)
                     print(f"  ✓ Sesión cerrada correctamente")
                     print(f"  ✓ Registrada en historial_sesiones")
                     print(f"  ✓ Binding IP+MAC eliminado")
@@ -799,6 +873,9 @@ class CaptivePortal:
 
                 # 10. Resetear contador de intentos
                 self.users.reset_failed_attempts(codigo)
+                
+                self.radius.accounting_start(codigo, ip_asignada, mac)
+
 
                 # 11. Emitir token completo a M6 (segunda llamada — instala flows en ONOS)
                 self.tokens.emitir_token(
