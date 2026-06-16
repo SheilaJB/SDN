@@ -374,6 +374,50 @@ class UserManager:
         finally:
             conn.close()
             
+    # Flujo para el rol Visitante
+    def registrar_visitante(self, correo, password):
+        """Inserta credenciales temporales de visitante en radcheck y radusergroup."""
+        conn = self.db.get_connection()
+        if not conn:
+            return False
+        try:
+            cur = conn.cursor()
+            # Insertar en radcheck
+            cur.execute("""
+                INSERT INTO radcheck (username, attribute, op, value)
+                VALUES (%s, 'Cleartext-Password', ':=', %s)
+            """, (correo, password))
+            # Insertar en radusergroup con rol Visitante
+            cur.execute("""
+                INSERT INTO radusergroup (username, groupname, priority)
+                VALUES (%s, 'Visitante', 1)
+            """, (correo,))
+            conn.commit()
+            return True
+        except Exception as e:
+            conn.rollback()
+            print(f"  [UserManager] Error al registrar visitante: {e}")
+            return False
+        finally:
+            conn.close()
+
+    def eliminar_visitante(self, correo):
+        """Elimina credenciales temporales de visitante al cerrar sesión."""
+        conn = self.db.get_connection()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM radcheck WHERE username = %s", (correo,))
+            cur.execute("DELETE FROM radusergroup WHERE username = %s", (correo,))
+            conn.commit()
+            print(f"  [DB] ✓ Credenciales visitante eliminadas ({correo})")
+        except Exception as e:
+            conn.rollback()
+            print(f"  [UserManager] Error al eliminar visitante: {e}")
+        finally:
+            conn.close()
+            
 # Se encarga del ciclo de vida completo de una sesion:
 #   - Verificar anti-spoofing (ip_mac_binding)
 #   - Registrar sesión en sesiones_activas
@@ -707,10 +751,128 @@ class CaptivePortal:
         print(f"  FreeRADIUS : {Config.RADIUS_HOST}:{Config.RADIUS_PORT}")
         print(Config.SEP2)
         print("  [1] Iniciar sesión")
-        print("  [2] Soy visitante  (no implementado)")
+        print("  [2] Soy visitante")
         print("  [3] Salir")
         print(Config.SEP)
 
+    def _flujo_visitante(self):
+        """Flujo completo para usuarios visitantes."""
+        print("\n")
+        print(Config.SEP)
+        print("        ACCESO VISITANTE — RED PUCP")
+        print(Config.SEP)
+        print("  Acceso temporal de 30 minutos.")
+        print("  Solo disponible: internet externo :D")
+        print(Config.SEP2)
+
+        # 1. Obtener IP del cliente
+        ip_asignada = self.get_client_ip()
+        if not ip_asignada:
+            ip_asignada = input("  IP del cliente (prueba local): ").strip()
+
+        print(f"  IP actual : {ip_asignada}  (VLAN {Config.VLAN_CUARENTENA} — cuarentena)")
+        print(Config.SEP2)
+
+        # 2. Solicitar correo y contraseña
+        try:
+            correo   = input("  Correo    : ").strip()
+            password = input("  Contraseña: ").strip()
+        except KeyboardInterrupt:
+            print("\n\n  Cancelado.")
+            return
+
+        if not correo or not password:
+            print("  [!] Ingresa correo y contraseña.")
+            input("  Presiona Enter para volver...")
+            return
+
+        # 3. Registrar credenciales temporales en DB
+        print("\n  Registrando acceso visitante...")
+        ok = self.users.registrar_visitante(correo, password)
+        if not ok:
+            print("  [ERROR] No se pudo registrar el visitante.")
+            input("  Presiona Enter para volver...")
+            return
+
+        # 4. Autenticar con FreeRADIUS
+        print("  Autenticando", end="", flush=True)
+        for _ in range(3):
+            time.sleep(0.3)
+            print(".", end="", flush=True)
+        print()
+
+        nombre_rol, _ = self.radius.authenticate(correo, password, ip_asignada)
+
+        if nombre_rol is None:
+            print("  [ERROR] FreeRADIUS rechazó las credenciales.")
+            self.users.eliminar_visitante(correo)
+            input("  Presiona Enter para volver...")
+            return
+
+        vlan_id = self.roles.get_vlan_id(nombre_rol)
+        if vlan_id is None:
+            print(f"  [ERROR] Rol '{nombre_rol}' no reconocido.")
+            self.users.eliminar_visitante(correo)
+            input("  Presiona Enter para volver...")
+            return
+
+        # 5. Resolver host vía M6
+        host = self.tokens.resolver_host(ip_asignada)
+        if not host:
+            print("  [ERROR] No se pudo resolver el host en ONOS.")
+            self.users.eliminar_visitante(correo)
+            input("  Presiona Enter para volver...")
+            return
+
+        mac         = host["mac"]
+        switch_dpid = host["switch_dpid"]
+        in_port     = host["in_port"]
+
+        # 6. Anti-spoofing
+        libre, motivo = self.sessions.verify_antispoofing(ip_asignada, mac)
+        if not libre:
+            print(f"\n  Anti-spoofing: {motivo}")
+            self.users.eliminar_visitante(correo)
+            input("  Presiona Enter para volver...")
+            return
+
+        # 7. Registrar sesión — id_usuario=None para visitantes
+        # Visitantes no tienen id_usuario en tabla usuarios
+        # Se usa un id especial: 0
+        id_sesion = self.sessions.register_session(
+            0, mac, ip_asignada,
+            vlan_id, nombre_rol, switch_dpid, in_port
+        )
+        if id_sesion is None:
+            print("  [ERROR] No se pudo registrar la sesión.")
+            self.users.eliminar_visitante(correo)
+            input("  Presiona Enter para volver...")
+            return
+
+        # 8. Binding IP+MAC
+        self.sessions.create_binding(ip_asignada, mac, 0, switch_dpid, in_port)
+
+        # 9. Accounting-Start
+        self.radius.accounting_start(correo, ip_asignada, mac)
+
+        # 10. Emitir token a M6
+        self.tokens.emitir_token(
+            correo, nombre_rol, vlan_id,
+            ip_asignada, mac, switch_dpid, in_port
+        )
+
+        print(f"  ✓ Sesión #{id_sesion} registrada — 30 minutos de acceso")
+
+        # 11. Menú sesión visitante
+        self._mostrar_menu_sesion_visitante(
+            correo, nombre_rol, vlan_id,
+            ip_asignada, mac
+        )
+
+        # 12. Al salir — limpiar credenciales
+        self.users.eliminar_visitante(correo)
+    
+    
     def _mostrar_recursos(self, nombre_rol, vlan_id):
         print("\n")
         print(Config.SEP)
@@ -768,6 +930,55 @@ class CaptivePortal:
                 input("  Presiona Enter para volver al menú principal...")
                 return
 
+
+
+    def _mostrar_menu_sesion_visitante(self, correo, nombre_rol, vlan_id, ip_asignada, mac):
+        """Menú simple para sesión visitante."""
+        inicio = datetime.datetime.now()
+        timeout = datetime.timedelta(minutes=30)
+
+        while True:
+            ahora    = datetime.datetime.now()
+            transcurrido = ahora - inicio
+            restante = timeout - transcurrido
+
+            if restante.total_seconds() <= 0:
+                print("\n  ⚠  Sesión expirada (30 minutos).")
+                self.sessions.close_session(mac, 0)
+                self.radius.accounting_stop(correo, ip_asignada, mac)
+                input("  Presiona Enter para volver...")
+                return
+
+            mins = int(restante.total_seconds() // 60)
+            segs = int(restante.total_seconds() % 60)
+
+            print("\n")
+            print(Config.SEP)
+            print("  ✓  ACCESO VISITANTE — Sesión activa")
+            print(Config.SEP)
+            print(f"  Correo      : {correo}")
+            print(f"  Rol         : {nombre_rol}")
+            print(f"  VLAN        : {vlan_id}")
+            print(f"  IP asignada : {ip_asignada}")
+            print(f"  Tiempo rest.: {mins:02d}:{segs:02d}")
+            print(Config.SEP2)
+            print("  [1] Cerrar sesión")
+            print(Config.SEP)
+
+            opcion = input("  Opción: ").strip()
+
+            if opcion == "1":
+                print("\n")
+                print(Config.SEP)
+                print("  Cerrando sesión visitante...")
+                self.sessions.close_session(mac, 0)
+                self.radius.accounting_stop(correo, ip_asignada, mac)
+                print("  ✓ Sesión cerrada")
+                print("  ✓ Credenciales eliminadas")
+                print(Config.SEP)
+                input("  Presiona Enter para volver...")
+                return
+    
     # El Flujo de login 
     def login(self):
         """
@@ -784,7 +995,7 @@ class CaptivePortal:
             ).strip()
 
         print(Config.SEP)
-        print(f"  IP actual   : {ip_asignada}  (VLAN 90 — cuarentena)")
+        print(f"  IP actual   : {ip_asignada}  (VLAN {Config.VLAN_CUARENTENA} — cuarentena)")
         print("  Ingresa tus credenciales PUCP para acceder a la red")
         print(Config.SEP2)
 
@@ -921,10 +1132,7 @@ class CaptivePortal:
                 self.login()
 
             elif opcion == "2":
-                print(Config.SEP)
-                print("  Flujo visitante — no implementado aún.")
-                print(Config.SEP)
-                input("  Presiona Enter para volver...")
+                self._flujo_visitante()
 
             elif opcion in ("3", "q", "salir"):
                 print("\n  Saliendo del portal.\n")
